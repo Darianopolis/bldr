@@ -149,10 +149,15 @@ void populate_artifactory_from_file(project_artifactory_t& artifactory, const st
 
 void populate_artifactory(project_artifactory_t& artifactory)
 {
+std::cout<<__FILE__<<":"<<__LINE__<<'\n';
     for (auto& file : std::filesystem::directory_iterator(std::filesystem::current_path())) {
+std::cout<<__FILE__<<":"<<__LINE__<<'\n';
         if (file.path().string().ends_with("bldr.lua")) {
+std::cout<<__FILE__<<":"<<__LINE__<<'\n';
             std::cout << "Loading bldr file: " << file.path().string() << '\n';
             populate_artifactory_from_file(artifactory, file.path());
+std::cout<<__FILE__<<":"<<__LINE__<<'\n';
         }
+std::cout<<__FILE__<<":"<<__LINE__<<'\n';
     }
 }
