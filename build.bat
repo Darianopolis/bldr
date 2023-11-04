@@ -27,3 +27,5 @@ link /nologo ^
     /out:out\bootstrap\bldr.exe out\bootstrap\*.obj ^
     vendor\luajit\src\luajit.lib ^
     vendor\luajit\src\lua51.lib
+
+out\bootstrap\bldr.exe bldr
