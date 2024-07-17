@@ -12,3 +12,8 @@
         - Fast and consistent path normalization
     - Cons:
         - Complicates bootstrapping process
+- Move bldr-gui in to bldr project
+- Add custom environment variable entries
+    - Custom slangc shader compiler path
+- bldr install
+    - install by *PROJECT NAME* instead of file!
