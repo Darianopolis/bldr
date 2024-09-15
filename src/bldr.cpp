@@ -161,6 +161,7 @@ int main(int argc, char* argv[]) try
                 configure_cmake(to_build, flags);
             } else if (args[1] == "vscode") {
                 configure_vscode(to_build, flags);
+                configure_compile_commands(to_build, flags);
             }
         }
 

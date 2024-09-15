@@ -6,7 +6,6 @@
 #include <unordered_map>
 #include <filesystem>
 #include <span>
-#include <chrono>
 
 using namespace std::literals;
 namespace fs = std::filesystem;
@@ -60,6 +59,8 @@ enum class source_type_t
     c,
     slang,
     embed,
+    cppheader,
+    cheader,
     _max_enum,
 };
 std::ostream& operator<<(std::ostream& os, source_type_t type);
@@ -103,6 +104,7 @@ struct project_t
     fs::path    dir;
 
     std::vector<source_t>    sources;
+    std::vector<source_t>    headers;
     std::vector<fs::path>    includes;
     std::vector<fs::path>    force_includes;
     std::vector<fs::path>    lib_paths;
@@ -129,6 +131,7 @@ void debug_project(project_t& project);
 bool build_project(std::span<project_t*> projects, flags_t flags);
 void configure_cmake(std::span<project_t*> projects, flags_t flags);
 void configure_vscode(std::span<project_t*> projects, flags_t flags);
+void configure_compile_commands(std::span<project_t*> projects, flags_t);
 
 // -----------------------------------------------------------------------------
 

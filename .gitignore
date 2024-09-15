@@ -2,6 +2,8 @@
 .vs/
 .idea/
 .vscode/
+.cache/
+compile_commands.json
 
 # Build output
 build/

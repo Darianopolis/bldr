@@ -2,21 +2,18 @@
 #include "log.hpp"
 #include "json.hpp"
 
+#include <chrono>
 #include <unordered_set>
 #include <filesystem>
 #include <array>
 #include <fstream>
-#include <algorithm>
 #include <regex>
-#include <ranges>
 #include <spanstream>
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
-#include <any>
-
-#include "Windows.h"
-#include "shellapi.h"
+#include <Windows.h>
+#include <winbase.h>
 
 std::string generate_env()
 {
@@ -38,7 +35,8 @@ std::string generate_env()
     STARTUPINFOA startup{};
     PROCESS_INFORMATION process{};
 
-    std::string cmd = "cmd /c call \"C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvarsx86_amd64.bat\" && set";
+    std::string cmd = "cmd /c call \"C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvars64.bat\" && set";
+    // std::string cmd = "cmd /c call \"C:/Program Files/Microsoft Visual Studio/2022/Preview/VC/Auxiliary/Build/vcvars64.bat\" && set";
 
     SECURITY_ATTRIBUTES sec_attribs;
     SecureZeroMemory(&sec_attribs, sizeof(sec_attribs));
@@ -218,10 +216,13 @@ uint32_t execute_program(const program_exec_t& info, [[maybe_unused]] flags_t fl
         }
     };
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
-
-    DWORD ec;
-    GetExitCodeProcess(pi.hProcess, &ec);
+    DWORD ec = 9999;
+    DWORD timeout = DWORD(std::chrono::milliseconds(20s).count());
+    if (WaitForSingleObject(pi.hProcess, timeout) != WAIT_OBJECT_0) {
+        log_error("Operation timed out compiling: {}...", name);
+    } else {
+        GetExitCodeProcess(pi.hProcess, &ec);
+    }
 
     CloseHandle(stdout_write);
     CloseHandle(stdout_read);
@@ -278,15 +279,30 @@ void generate_build(project_artifactory_t& artifactory,  project_t& project, pro
             auto src_type = type;
             if (type == source_type_t::automatic) {
                 if      (file.extension() == ".cppm" ) src_type = source_type_t::cppm;
+                else if (file.extension() == ".cxxm" ) src_type = source_type_t::cppm;
+                else if (file.extension() == ".c++m" ) src_type = source_type_t::cppm;
+                else if (file.extension() == ".ccm"  ) src_type = source_type_t::cppm;
                 else if (file.extension() == ".ixx"  ) src_type = source_type_t::cppm;
+
                 else if (file.extension() == ".cpp"  ) src_type = source_type_t::cpp;
                 else if (file.extension() == ".cxx"  ) src_type = source_type_t::cpp;
+                else if (file.extension() == ".c++"  ) src_type = source_type_t::cpp;
                 else if (file.extension() == ".cc"   ) src_type = source_type_t::cpp;
+
+                else if (file.extension() == ".hh"   ) src_type = source_type_t::cppheader;
+                else if (file.extension() == ".hpp"  ) src_type = source_type_t::cppheader;
+                else if (file.extension() == ".hxx"  ) src_type = source_type_t::cppheader;
+                else if (file.extension() == ".h++"  ) src_type = source_type_t::cppheader;
+
                 else if (file.extension() == ".c"    ) src_type = source_type_t::c;
+                else if (file.extension() == ".h"    ) src_type = source_type_t::cppheader;
+
                 else if (file.extension() == ".slang") src_type = source_type_t::slang;
             }
 
-            if (src_type != source_type_t::automatic) {
+            if (src_type == source_type_t::cppheader) {
+                output.headers.push_back({ {file.string()}, src_type });
+            } else if (src_type != source_type_t::automatic) {
                 output.sources.push_back({ {file.string()}, src_type });
             }
         };
@@ -431,13 +447,15 @@ void save_file_include_cache()
     };
 
     uint32_t count = 0;
-    for (auto& file : std::views::values(file_cache)) {
+    // for (auto& file : std::views::values(file_cache)) {
+    for (auto&[key, file] : file_cache) {
         count += file->scanned;
     }
 
     WriteUInt32(count);
 
-    for (auto& file : std::views::values(file_cache)) {
+    // for (auto& file : std::views::values(file_cache)) {
+    for (auto&[key, file] : file_cache) {
         if (!file->scanned) continue;
         WriteString(file->name);
         WriteUInt32(uint32_t(file->includes.size()));
@@ -789,12 +807,14 @@ bool build_project(std::span<project_t*> projects, flags_t flags)
             }
 
             args(info, "cmd", "/c", "cl");
+            // args(info, "cmd", "/c", "clang-cl");
 
             // TODO: Parameterize
 
             arg(info, "/c");               // Compile without linking
             arg(info, "/nologo");          // Suppress banner
             arg(info, "/arch:AVX2");       // AVX2 vector extensions
+            // arg(info, "/arch:AVX512");       // AVX512 vector extensions
             if (is_set(flags, flags_t::debug)) {
                 arg(info, "/MDd");         // Use dynamic debug CRT
             } else {
@@ -866,7 +886,7 @@ bool build_project(std::span<project_t*> projects, flags_t flags)
             }
 
             if (source.type == source_type_t::c) {
-                arg(info, "/std:c23");
+                arg(info, "/std:clatest");
                 arg(info, "/Tc", source.file.string());
             } else {
                 arg(info, "/EHsc");           // Full exception unwinding
@@ -1011,7 +1031,6 @@ bool build_project(std::span<project_t*> projects, flags_t flags)
             // }
             // arg(info, "delayimp.lib");
 
-
             // Check if any link inputs changed
 
             if (any_changed) {
@@ -1098,6 +1117,79 @@ bool build_project(std::span<project_t*> projects, flags_t flags)
         log_error("------------------------------------------------------------------------");
         return false;
     }
+}
+
+void configure_compile_commands(std::span<project_t*> projects, flags_t)
+{
+    log_info("Generating compilation database");
+
+    std::ofstream out("compile_commands.json", std::ios::binary);
+    json_writer_t json(out);
+
+    // Defines
+
+    auto defined = std::unordered_set<std::string>();
+    defined.insert("WIN32");
+    defined.insert("UNICODE");
+    defined.insert("_UNICODE");
+    for (int32_t i = 0; i < projects.size(); ++i) {
+        auto& project = *projects[i];
+
+        for (auto& define : project.build_defines) {
+            if (!define.value.empty()) {
+                defined.insert(std::format("{}={}", define.key, define.value));
+            } else {
+                defined.insert(define.key);
+            }
+        }
+    }
+
+    // Write
+
+    json.array();
+    {
+        for (auto* project : projects) {
+
+            std::unordered_set<fs::path> processed_sources;
+            auto add_source = [&](const source_t& source) {
+
+                if (processed_sources.contains(source.file)) return;
+                processed_sources.emplace(source.file);
+
+                json.object();
+                {
+                    json["directory"] = ".";
+                    std::string cmd;
+                    cmd += "D:/Dev/Cloned/llvm-project/build/bin/clang-cl.exe /nologo /std:c++latest /EHsc ";
+                    cmd += to_string(source.file);
+                    for (auto& define : defined) {
+                        cmd += " -D";
+                        cmd += define;
+                    }
+                    for (auto& include : project->includes) {
+                        cmd += " -I";
+                        cmd += to_string(include);
+                    }
+                    cmd += " -c -o ";
+
+                    auto output = fs::path(source.file.filename());
+                    output.replace_extension(output.extension().string() + ".obj");
+
+                    cmd += to_string(output);
+                    json["command"] = cmd;
+                    json["file"] = to_string(source.file);
+                    json["output"] = to_string(output);
+                }
+                json.end_object();
+            };
+
+            for (auto& source : project->sources) add_source(source);
+            for (auto& source : project->headers) add_source(source);
+        }
+    }
+    json.end_array();
+
+    log_info("Generation complete");
 }
 
 void configure_vscode(std::span<project_t*> projects, flags_t)
@@ -1222,6 +1314,7 @@ void configure_cmake(std::span<project_t*> projects, flags_t)
     out << "project(" << projects[0]->name << ")\n";
     out << "set(CMAKE_CXX_STANDARD 23)\n";
     out << "set(CMAKE_CXX_STANDARD_REQUIRED True)\n";
+    out << "set(CMAKE_EXPORT_COMPILE_COMMANDS ON)\n";
     out << "add_compile_options(\n";
     out << "        /Zc:preprocessor\n";
     out << "        /Zc:__cplusplus\n";
